@@ -9,6 +9,10 @@ layout: default
 
 # 4d-plugin-draft-email
 
+Draft an HTML email with attachments, ready to edit or send in Mail app.
+
+Basically an alternative to `mailto:` URL scheme.
+
 ## Usage
 
 ```4d
