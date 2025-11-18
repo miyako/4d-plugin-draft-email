@@ -1,0 +1,16 @@
+Confirm project release — April 30, 2026
+
+Hi Keisuke,
+
+We're preparing to release Neptune on April 30, 2026. Before we proceed, please confirm the following items are complete:
+
+- QA: Regression tests passed, Smoke tests scheduled
+- Docs: Release notes drafted, API changelog reviewed
+
+Approve: https://example.com/releases/neptune/approve
+Approval deadline: 2026-04-28 18:00 (JST)
+
+If you prefer to reply by email, send to releases@example.com and include release ID #NEP-2026-04.
+
+Neptune Release Team
+releases@example.com

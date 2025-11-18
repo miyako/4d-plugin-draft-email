@@ -1,0 +1,11 @@
+{
+    "name": "Mail",
+    "id": 20000,
+    "commands": [
+        {
+            "theme": "Mail",
+            "syntax": "CREATE EMAIL DRAFT(&J)",
+            "threadSafe": true
+        }
+    ]
+}
