@@ -1,2 +1,2 @@
 # 4d-plugin-draft-email
-Launch mail client with HTML body and attachments
+Draft an HTML email with attachments, ready to edit or send in Mail app.
