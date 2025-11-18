@@ -12,10 +12,10 @@ description: "Draft an HTML email with attachments, ready to edit or send in Mai
 logo: "/assets/logo.png"   # optional
 show_downloads: true       # controls the download links in header
 github:
-  is_user_page: true
+  is_user_page: false
   owner_url: "https://github.com/miyako"
   repository_url: "https://github.com/miyako/4d-plugin-draft-email"
-  is_project_page: false
+  is_project_page: true
 
 exclude:
   - "vendor"
