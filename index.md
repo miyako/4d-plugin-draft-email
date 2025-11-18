@@ -26,3 +26,5 @@ $email.recipients.push("keisuke.miyako@4d.com")
 
 CREATE EMAIL DRAFT($email)
 ```
+
+<img width="503" height="748" alt="" src="https://github.com/user-attachments/assets/2d3bb022-a0ed-47dc-aaac-bdbd61018279" />
