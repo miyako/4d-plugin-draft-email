@@ -68,16 +68,19 @@ static bool _object_to_path(PA_ObjectRef f, std::string& path, int type) {
             path = std::string((const char *)u8.c_str(), u8.size());
             
             PA_ClearVariable(&cbparams[0]);
-            PA_ClearVariable(&cbparams[1]);//PLATFORMPATH belongs to variable. no need to dispose
+            PA_ClearVariable(&cbparams[1]);
+            PA_DisposeUnistring(&PLATFORMPATH);
 #if VERSIONMAC
             PA_DisposeUnistring(&PATH);
             PA_ClearVariable(&_p);//see .h of PA_GetObjectProperty
 #endif
             PA_ClearVariable(&p);//see .h of PA_GetObjectProperty
+            PA_ClearVariable(&folder);
             
             return true;
         }
-    
+        
+        PA_DisposeUnistring(&PLATFORMPATH);
     }
     
     return false;
@@ -107,8 +110,13 @@ static PA_ObjectRef path_to_folder_object(std::string& m) {
     PA_SetLongintVariable(&cbparams[1], 1/*fk platform path*/);
     PA_Variable folder = PA_ExecuteCommandByID(1567 /*4D.Folder*/, cbparams, 2);
     PA_ClearVariable(&cbparams[0]);
-    PA_ClearVariable(&cbparams[1]);//path belongs to variable. no need to dispose
+    PA_ClearVariable(&cbparams[1]);
+    PA_DisposeUnistring(&path);
 
+    // NOTE: `folder` is intentionally NOT cleared here (unlike in _object_to_path)
+    // because the PA_ObjectRef this function returns is owned by it; clearing
+    // the variable before returning could invalidate the returned reference.
+    // This function is currently unused (dead code) — remove it if it stays that way.
     return PA_GetObjectVariable(folder);
 }
 
@@ -141,9 +149,21 @@ static void __CREATE_EMAIL_DRAFT__(NSDictionary *dict) {
     
     NSMutableArray *items = [[NSMutableArray alloc]init];
     
-    NSAttributedString *htmlBody = [dict objectForKey:@"htmlBody"];
-    if(htmlBody) {
-        [items addObject:htmlBody];
+    // HTML -> NSAttributedString conversion is done here (main thread) rather than
+    // in CREATE_EMAIL_DRAFT, because Apple's HTML import for NSAttributedString
+    // requires the main thread and can otherwise misbehave, hang, or return nil
+    // when called from a background/worker thread (this command is threadSafe).
+    NSString *html = [dict objectForKey:@"htmlBody"];
+    if(html) {
+        NSAttributedString *htmlBody = [[NSAttributedString alloc]
+            initWithData:[html dataUsingEncoding:NSUTF8StringEncoding]
+            options:@{NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType}
+            documentAttributes:nil
+            error:nil];
+        if(htmlBody) {
+            [items addObject:htmlBody];
+        }
+        [htmlBody release];
     }
     NSString *textBody = [dict objectForKey:@"textBody"];
     if(textBody) {
@@ -168,32 +188,35 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
         
         CUTF8String _textBody, _htmlBody, _subject;
         if(ob_get_s(options, L"htmlBody", &_htmlBody)) {
+            // Raw HTML text is handed across as-is; it is converted to an
+            // NSAttributedString on the main thread in __CREATE_EMAIL_DRAFT__
+            // (see note there for why).
             NSString *html = [[NSString alloc]initWithUTF8String:(const char *)_htmlBody.c_str()];
-            NSAttributedString *htmlBody = [[NSAttributedString alloc]
-                initWithData:[html dataUsingEncoding:NSUTF8StringEncoding]
-                options:@{NSDocumentTypeDocumentAttribute: NSHTMLTextDocumentType}
-                documentAttributes:nil
-                error:nil];
-            [dict setObject:htmlBody forKey:@"htmlBody"];
-            [htmlBody release];
+            if(html) {
+                [dict setObject:html forKey:@"htmlBody"];
+            }
             [html release];
         }
         
         if(ob_get_s(options, L"textBody", &_textBody)) {
             NSString *textBody = [[NSString alloc]initWithUTF8String:(const char *)_textBody.c_str()];
-            [dict setObject:textBody forKey:@"textBody"];
+            if(textBody) {
+                [dict setObject:textBody forKey:@"textBody"];
+            }
             [textBody release];
         }
 
         if(ob_get_s(options, L"subject", &_subject)) {
             NSString *subject = [[NSString alloc]initWithUTF8String:(const char *)_subject.c_str()];
-            [dict setObject:subject forKey:@"subject"];
+            if(subject) {
+                [dict setObject:subject forKey:@"subject"];
+            }
             [subject release];
         }
 
-        NSMutableArray *attachments = [[NSMutableArray alloc]init];
         PA_CollectionRef _attachments = ob_get_c(options, L"attachments");
         if(_attachments) {
+            NSMutableArray *attachments = [[NSMutableArray alloc]init];
             for (PA_long32 i = 0; i < PA_GetCollectionLength(_attachments); ++i) {
                 PA_Variable v = PA_GetCollectionElement(_attachments, i);
                 if(PA_GetVariableKind(v) == eVK_Object) {
@@ -201,9 +224,13 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
                     std::string path;
                     if(file_object_to_path(o, path)) {
                         NSString *a = [[NSString alloc]initWithUTF8String:path.c_str()];
-                        NSURL *u = [[NSURL alloc]initFileURLWithPath:a];
-                        [attachments addObject:u];
-                        [u release];
+                        if(a) {
+                            NSURL *u = [[NSURL alloc]initFileURLWithPath:a];
+                            if(u) {
+                                [attachments addObject:u];
+                            }
+                            [u release];
+                        }
                         [a release];
                     }
                 }
@@ -212,23 +239,28 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
             [attachments release];
         }
         
-        NSMutableArray *recipients = [[NSMutableArray alloc]init];
         PA_CollectionRef _recipients = ob_get_c(options, L"recipients");
         if(_recipients) {
+            NSMutableArray *recipients = [[NSMutableArray alloc]init];
             for (PA_long32 i = 0; i < PA_GetCollectionLength(_recipients); ++i) {
                 PA_Variable v = PA_GetCollectionElement(_recipients, i);
                 if(PA_GetVariableKind(v) == eVK_Unistring) {
                     PA_Unistring s = PA_GetStringVariable(v);
-                    std::string addr;
                     C_TEXT t;
                     t.setUTF16String(&s);
                     NSString *r = t.copyUTF16String();
-                    [recipients addObject:r];
+                    if(r) {
+                        [recipients addObject:r];
+                    }
                     [r release];
                 }
-                [dict setObject:recipients forKey:@"recipients"];
-                [recipients release];
             }
+            // setObject:/release moved OUTSIDE the for-loop (previously nested one
+            // brace too shallow, which released `recipients` after the 1st element
+            // and then reused it on the 2nd -> use-after-free / crash with 2+ recipients,
+            // and leaked it entirely with 0 recipients).
+            [dict setObject:recipients forKey:@"recipients"];
+            [recipients release];
         }
 
         PA_RunInMainProcess(
