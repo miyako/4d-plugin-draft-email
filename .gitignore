@@ -1,2 +1,5 @@
 Mail/test/userPreferences.*
 Mail/build/*
+build/*
+test/Project/DerivedData/*
+test/Libraries/lib4d-arm64.dylib
