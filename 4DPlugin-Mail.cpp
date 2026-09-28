@@ -187,7 +187,7 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
         NSMutableDictionary *dict = [[NSMutableDictionary alloc]init];
         
         CUTF8String _textBody, _htmlBody, _subject;
-        if(ob_get_s(options, L"htmlBody", &_htmlBody)) {
+        if(ob_get_a(options, L"htmlBody", &_htmlBody)) {
             // Raw HTML text is handed across as-is; it is converted to an
             // NSAttributedString on the main thread in __CREATE_EMAIL_DRAFT__
             // (see note there for why).
@@ -198,7 +198,7 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
             [html release];
         }
         
-        if(ob_get_s(options, L"textBody", &_textBody)) {
+        if(ob_get_a(options, L"textBody", &_textBody)) {
             NSString *textBody = [[NSString alloc]initWithUTF8String:(const char *)_textBody.c_str()];
             if(textBody) {
                 [dict setObject:textBody forKey:@"textBody"];
@@ -206,7 +206,7 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
             [textBody release];
         }
 
-        if(ob_get_s(options, L"subject", &_subject)) {
+        if(ob_get_a(options, L"subject", &_subject)) {
             NSString *subject = [[NSString alloc]initWithUTF8String:(const char *)_subject.c_str()];
             if(subject) {
                 [dict setObject:subject forKey:@"subject"];
