@@ -168,6 +168,127 @@ CREATE EMAIL DRAFT($email)
 
 ---
 
+## Maintainer workflows
+
+**Bump version** is manual and source-only. Select the intended branch in
+Actions and choose `patch`, `minor`, or `major`. It validates the selected
+immutable commit, all six project and target configurations, source plist and
+localized display metadata before changing anything. It commits only those
+three source files, with the Copilot co-author trailer. No tag, release, build,
+or workflow dispatch is produced. Run **Build** separately on the resulting
+branch commit; Build has no inputs beyond Actions' branch selector.
+
+The bump requires a clean checkout and the selected branch's exact remote SHA.
+An executable pre-push guard is mandatory both initially and immediately before
+push. The guard checks Git's advertised old SHA, literal new commit SHA, exact
+target, one direct parent, and exactly one update. Advance, rewind, deletion,
+and even a concurrent identical-result push fail closed. Push is non-force,
+with both `push.followTags=false` and `--no-follow-tags`.
+
+Build checks out `github.sha` in both jobs. Source metadata, not a supplied tag
+or branch name, determines `vX.Y.Z`, `Mail-X.Y.Z.zip`, and `Mail-X.Y.Z.dmg`.
+A constant repository-wide publication concurrency group serializes builds
+across branches without cancellation. Early availability checks and a second
+check after every native/signing/notarization/stapling gate reject any existing
+remote tag or matching draft/published release. Authenticated release pages
+are validated in full, including later pages; API/authentication/404/network
+or malformed responses abort rather than imply availability.
+
+Publication uses separate create-only requests: POST a new `git/refs` tag at
+the selected SHA, verify that remote ref, POST a new public non-prerelease
+release named after the tag with the original empty body/no generated notes,
+then POST each asset to that newly returned release ID. It never reuses,
+updates, deletes, clobbers, rolls back, or retries publication state.
+
+### Version authority and migration evidence
+
+The original bump workflow was introduced in
+`6cb499a9dbde3a0bfcc2f64fb2e50a6982b17e34` (`mv`). Rename-follow history for both
+workflow files ends there; the parent has no earlier bump/release workflow.
+Its header explicitly promises to force-write **MARKETING_VERSION and
+CURRENT_PROJECT_VERSION**, plus plist short/build versions, from one version.
+This explicit coordinated promise overrides the body's buggy marketing-first,
+current-only-fallback implementation; it is not evidence of an independent
+build counter. At migration intake, all six marketing values and the actual
+source `Info.plist` short version were `1.0.3`, while six current values and
+the copied localized display strings remained `1.0.0`.
+
+The migration repairs only that proven drift to the **existing `1.0.3`**, with
+no version increment. The source plist has no `CFBundleVersion`; that absence
+is preserved. `INFOPLIST_FILE = Info.plist` in all three target configurations
+and the Resources phase's `English.lproj/InfoPlist.strings` identify the actual
+copied metadata. The latter's CR-only endings and `Copyright 2025 miyako.`
+are preserved. Future bumps preserve BOMs, individual line endings (including
+mixed endings), file modes, formatting, supported build references, absent
+optional keys and unrelated bytes. Duplicate/malformed keys, unresolved or
+cyclic references and drift are rejected before writes. Committed bundles,
+archives, dependencies, 4D data/schema and counters are never version inputs.
+
+The full pinned prior-art snapshots used for the adaptation are:
+
+- `miyako/4d-plugin-native-encoding-detection@c42ca565857f674bde5ea6ed3435c87375eda4a7`:
+  coordinated six-configuration metadata, strict localized tokenizer,
+  advertised-SHA guard and create-only lifecycle.
+- `miyako/4d-plugin-file-information@19848973601acfd3a2b5070230fa40cdc7e4edb2`:
+  malformed-key rejection and UTF-16/binary built localized metadata checks.
+  Its three-configuration and explicit i386-exclusion contract are not Mail's.
+- `miyako/4d-plugin-common-string-algorithm@2606a68201866ec9fcbb38b51462d79215f504ef`
+  and corrected
+  `miyako/4d-plugin-window-button@3f14facb9aaaaff0e22eeb8e07531163680c3a8a`:
+  independent-build/reference counterexamples, deliberately not applied to
+  Mail's explicit coordinated authority.
+
+### Native contract and safety changes
+
+Despite its old Windows-first comment, the original release had **only a macOS
+job**. That is preserved: `macos-latest`, Mail project/target, configuration
+`Default`, `arm64 x86_64`, `ONLY_ACTIVE_ARCH=NO`, and the existing deployment
+override `11.0` (not silently modernized to the project's `11.5`). Native
+toolchains, dependencies, frameworks, resources and Xcode build phases are
+unchanged. Committed Windows64 files remain in the packaged bundle without
+inventing a Windows build. The original required both macOS slices, but had
+no explicit i386 rejection; no unrelated architecture policy is added.
+Required slices are checked with `lipo -verify_arch`: substring matching
+could previously mistake `arm64e` or `x86_64h` for the required slices.
+
+The old workflow could select a committed stale binary if Xcode built
+elsewhere. Build now removes only the exact old macOS executable, copied
+plist/localization, signature and known intermediate directories, pins
+`CONFIGURATION_BUILD_DIR` to the verified `test/Plugins` location, and checks
+built metadata against selected source. It never recursively searches for
+an output or deletes the whole bundle; QuickLook, other resources and
+cross-platform files survive. Both notarization responses must explicitly
+report JSON `status: Accepted` before DMG stapling and publication.
+
+Signing/import, verification, ZIP/DMG formats and stapling retain the original
+commands and secret **names**: `APPLE_DEVELOPER_ID_CERTIFICATE`,
+`APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`,
+`NOTARYTOOL_APPLE_ID`, `NOTARYTOOL_TEAM_ID`, and `NOTARYTOOL_PASSWORD`.
+There were no release branch restrictions to remove. The unrelated Jekyll
+workflow retains its existing `main` push/manual triggers and permissions;
+its checkout is also pinned to `github.sha`, like every other checkout.
+
+### Partial-publication recovery
+
+Failure may leave a new tag, a public release, or only some uploaded assets.
+These are deliberately retained and the workflow reports the error; a rerun
+of the same source version must refuse them. Inspect the failed run, exact
+tag SHA, release ID and asset list manually. Decide explicitly whether to
+complete that release outside this automation or leave it and bump a new
+source version. Do not expect this workflow to repair, delete or overwrite
+existing publication state. Re-dispatch Bump if the selected branch moved;
+do not force-push a failed bump.
+
+### Offline regression checks
+
+Run `actionlint` and
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/tests -v`.
+The suites use disposable source copies, real local bare Git remotes, fake
+GitHub API responses, and closed-PATH native command stubs. Also run the
+entire suite in a disposable copy after a source-only bump to catch
+intake-version assumptions. No real native build, signing, notarization,
+4D execution or GitHub publication is needed.
+
 ## Version history
 
 **Current release**
