@@ -1,0 +1,19 @@
+name: Native ownership tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ownership:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Actual-source ownership regressions (unsigned, synthetic UI)
+        run: PYTHONDONTWRITEBYTECODE=1 python3 .github/tests/run_ownership.py
+      - name: Existing offline regressions
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/tests -q

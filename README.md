@@ -289,6 +289,114 @@ entire suite in a disposable copy after a source-only bump to catch
 intake-version assumptions. No real native build, signing, notarization,
 4D execution or GitHub publication is needed.
 
+## Native ownership maintenance
+
+The bounded audit baseline is
+`55e0827b7df0df9aa2b4672b4de8bc907d60b3b8`. Path command arguments now own an
+independent copy rather than aliasing a property result that is cleared
+separately. The unused folder constructor clears its argument only once and
+hands its successful object reference to its caller. JSON setters start with
+an undefined variable before assigning an owned string/picture, avoiding the
+loss of an allocated empty value. Successful property/collection-element
+results are cleared after copying scalar content, including type mismatches.
+Successful object/collection getter references remain **owning handoffs**:
+callers must use `PA_DisposeObject` / `PA_DisposeCollection` after use.
+Draft collection consumers now release those references and their elements.
+Failed getter outputs are neither inspected nor cleared.
+
+The bundled SDK's command handle-allocation failure returns a zero-initialized
+raw-kind-0 sentinel, unlike its normal initialized undefined result.
+`PA_GetVariableKind` normalizes raw 0 to string; it cannot validate this
+sentinel. Path/stringify helpers check the raw kind and command error before
+use, and never clear the invalid sentinel. The existing command API's void /
+boolean / null failure conventions are preserved; no asynchronous Mail
+redesign or new error interface is introduced.
+
+### Complete native inventory and reachability
+
+| Tracked native surface | Build / ownership finding |
+|---|---|
+| `4DPlugin-Mail.cpp`, `.h` | Xcode Objective-C++; dispatcher selector 1 calls `CREATE_EMAIL_DRAFT`. Includes JSON and C_TEXT headers. `_object_to_path` is used by attachment conversion; `folder_object_to_path` and `path_to_folder_object` are dormant but compiled. |
+| `support/4DPlugin-JSON.cpp`, `.h` | Xcode compiled helpers; scalar getters and collection getter are reached by the dispatcher. All setter overloads, object getter and stringify are compiled even when unused here. No first-party JSON Parse call exists. |
+| `4D Plugin API/Classes/C_TEXT.cpp`, `.h` | Xcode compiled; copies borrowed input into C++ storage and uses content setters for parameter/return output. UTF-8 conversion uses actual CoreFoundation in the regression. |
+| `4D Plugin API/Classes/ARRAY_TEXT.cpp`, `.h` | Tracked but not in either project compile list. Copies borrowed array elements; creates an independent string per output element without disposing accepted transfers. Included in the regression build. |
+| `4D Plugin API/Classes/C_BLOB.cpp`, `.h` | Dormant; bytes/handle and text conversion wrapper, no scalar string transfer. Included in the regression build. Unrelated blob failure/bounds behavior is not changed. |
+| `4D Plugin API/Classes/C_LONGINT.cpp`, `.h`; `C_REAL.cpp`, `.h`; `C_TYPES.h` | Dormant scalar wrappers/shared typedefs; no string owner. Included in the regression compile inventory. |
+| `4DPluginAPI.c`, `.h`, `PrivateTypes.h`, `PublicTypes.h`, `Flags.h`, `EntryPoints.h`, `4DPluginAPI.def` | Bundled SDK implementation, ABI/types/platform flags/engine selectors/export definition. Inspected for actual contracts; unchanged. Both projects list SDK and Mail sources. The Windows project does not compile JSON/C_TEXT and Mail imports Cocoa unconditionally: Windows is not supported or certified by this audit. |
+| `manifest.json`; `test/Plugins/Mail.bundle/Contents/Resources/manifest.json` | Both declare only `CREATE EMAIL DRAFT(&J)`, thread-safe, ID 20000. No `&Y` declaration; metadata does not establish ownership. Both source dispatcher and SDK export `FourDPackex` were checked. |
+
+No CPicture or C_POINTER wrapper is tracked in this repository. The vendored
+JSON headers, static libraries, committed bundles/archives and 4D database
+files are outside first-party fixes; none are rewritten or executed.
+
+### SDK provenance and contracts
+
+The SDK implementation was introduced in repository commit
+`6cb499a9dbde3a0bfcc2f64fb2e50a6982b17e34`; its SHA-256 is
+`5bac571c5c4cafd280fa7f23d775458a23701287e8735be27d4a2190002f4e3f`.
+The `.c` comment says v14 and the public header says v13; neither proves an
+upstream SDK release identity. Guidance was read from
+`miyako/skills/4d-skills/skills/4dplugin/SKILL.md` at
+`e6b492fcb81e5e1a7f7db723594b420e63bf6eb9`, including merged changes 69/71.
+
+`PA_SetStringInArray` disposes the old element and shallow-transfers the input
+descriptor only for Unicode arrays with non-null data, index
+`0 <= index <= count`, and a non-null descriptor pointer. Rejections retain
+caller ownership. Index zero is accepted. `PA_GetStringInArray` is borrowed:
+copy before replacement/shrink/clear. `PA_SetStringVariable` also assigns
+shallowly without clearing an old value. `PA_CreateVariable(eVK_Unistring)`
+creates an empty string, which can be allocated. `PA_ReturnString` instead
+calls the engine-backed content setter. Successful object-property and
+collection-element results are owning, as the bundled SDK comments state.
+Their failure output is unspecified; immediately capture `PA_GetLastError`.
+Synchronous command input arguments may be cleaned after return when they
+have independent owners.
+
+### Safe regression procedure and limits
+
+On macOS with Apple clang, run:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 .github/tests/run_ownership.py
+```
+
+This compiles the actual Mail source, all tracked wrappers, JSON helpers and
+**full unchanged SDK**, with ASan/UBSan, into a disposable executable, not a
+plugin bundle. Engine-boundary shims track exact UTF-16 content/length/
+termination, handles and owning object/collection/picture references.
+CoreFoundation and Foundation perform real in-memory text conversion.
+The sharing-service factory is replaced before the actual dispatcher is
+invoked; its sink asserts synthetic recipients/body/attachment URLs. No Mail
+client, account, file content, actual draft or send operation is accessed.
+The main-process shim is synchronous and does not certify host scheduling.
+
+The same harness accepts `--source-root /path/to/immutable/native/sources`
+and `--expect-baseline-failure`. Against the baseline above, seven named
+scenarios fail: path and dormant-folder alias double disposal, setter empty
+value leaks, property-result leaks, collection-result leaks, reading a failed
+getter output, and interpreting the failed-command raw-kind-0 sentinel as
+text. The unchanged array/content-setter contract scenario passes baseline.
+Corrected sources pass all eight scenarios with allocated and null empty
+strings, exact ASCII/BMP/supplementary text, and zero string/reference/handle
+balances. Coverage includes independent accepted transfers, replacement,
+borrowed copies, shrink/clear, all setter rejections, owning handoff survival,
+wrong-kind results, poisoned failed outputs, argument allocation failure and
+command handle failure. Explicit balances replace unavailable macOS LSan;
+ASan/UBSan remain enabled without sanitizer suppressions.
+
+The PR workflow runs only this unsigned direct compiler check and existing
+offline regressions. Manual release/version workflows and all project build
+phases are untouched; no signing, notarization, packaging or publication is
+part of these tests. The existing main-branch Jekyll deployment remains a
+separate merge-time authorization boundary.
+
+Normal array tests do **not** certify SDK resize allocation-failure safety:
+the SDK can update the element count despite failed handle resizing. That
+SDK/OOM issue, SDK-only application-path/picture-data output ownership, and
+pointer metadata semantics are deferred rather than guessed. No real 4D
+host, actual Windows execution, or reproduction of the originating Windows
+Poppler crash is claimed.
+
 ## Version history
 
 **Current release**

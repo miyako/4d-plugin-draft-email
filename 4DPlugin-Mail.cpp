@@ -47,37 +47,68 @@ static bool _object_to_path(PA_ObjectRef f, std::string& path, int type) {
         if(PA_GetObjectPropertyType(f, &PLATFORMPATH) == eVK_Unistring) {
             
             PA_Variable p = PA_GetObjectProperty(f, &PLATFORMPATH);
+            if(PA_GetLastError() != eER_NoErr) {
+                PA_DisposeUnistring(&PLATFORMPATH);
+                return false;
+            }
+            if(PA_GetVariableKind(p) != eVK_Unistring) {
+                PA_ClearVariable(&p);
+                PA_DisposeUnistring(&PLATFORMPATH);
+                return false;
+            }
             PA_Variable    cbparams[2];
-            cbparams[0] = PA_CreateVariable(eVK_Unistring);
+            cbparams[0] = PA_CreateVariable(eVK_Undefined);
             cbparams[1] = PA_CreateVariable(eVK_Longint);
             PA_Unistring platformPath = PA_GetStringVariable(p);
-            PA_SetStringVariable(&cbparams[0], &platformPath);
+            PA_Unichar empty = 0;
+            PA_Unistring argument = PA_CreateUnistring(platformPath.fLength ? platformPath.fString : &empty);
+            if(PA_GetLastError() != eER_NoErr) {
+                PA_ClearVariable(&p);
+                PA_DisposeUnistring(&PLATFORMPATH);
+                return false;
+            }
+            PA_SetStringVariable(&cbparams[0], &argument);
             PA_SetLongintVariable(&cbparams[1], 1/*fk platform path*/);
             PA_Variable folder = PA_ExecuteCommandByID(type, cbparams, 2);
-            
-#if VERSIONMAC
-            pp.setUTF8String((const uint8_t *)"path", 4);
-            PA_Unistring PATH = PA_CreateUnistring((PA_Unichar *)pp.getUTF16StringPtr());
-            PA_Variable _p = PA_GetObjectProperty(PA_GetObjectVariable(folder), &PATH);
-            platformPath = PA_GetStringVariable(_p);
-#endif
+            bool valid = folder.fType != 0 && PA_GetLastError() == eER_NoErr;
             C_TEXT t;
-            t.setUTF16String(&platformPath);
-            CUTF8String u8;
-            t.copyUTF8String(&u8);
-            path = std::string((const char *)u8.c_str(), u8.size());
+#if VERSIONMAC
+            valid = valid && PA_GetVariableKind(folder) == eVK_Object;
+            if(valid) {
+                pp.setUTF8String((const uint8_t *)"path", 4);
+                PA_Unistring PATH = PA_CreateUnistring((PA_Unichar *)pp.getUTF16StringPtr());
+                PA_Variable result = PA_GetObjectProperty(PA_GetObjectVariable(folder), &PATH);
+                valid = PA_GetLastError() == eER_NoErr;
+                if(valid) {
+                    valid = PA_GetVariableKind(result) == eVK_Unistring;
+                    if(valid) {
+                        platformPath = PA_GetStringVariable(result);
+                        t.setUTF16String(&platformPath);
+                    }
+                    PA_ClearVariable(&result);
+                }
+                PA_DisposeUnistring(&PATH);
+            }
+#else
+            if(valid) {
+                t.setUTF16String(&platformPath);
+            }
+#endif
+            if(valid) {
+                CUTF8String u8;
+                t.copyUTF8String(&u8);
+                path = std::string((const char *)u8.c_str(), u8.size());
+            }
             
             PA_ClearVariable(&cbparams[0]);
             PA_ClearVariable(&cbparams[1]);
             PA_DisposeUnistring(&PLATFORMPATH);
-#if VERSIONMAC
-            PA_DisposeUnistring(&PATH);
-            PA_ClearVariable(&_p);//see .h of PA_GetObjectProperty
-#endif
             PA_ClearVariable(&p);//see .h of PA_GetObjectProperty
-            PA_ClearVariable(&folder);
+            if(folder.fType != 0) {
+                PA_ClearVariable(&folder);
+            }
             
-            return true;
+            return valid;
         }
         
         PA_DisposeUnistring(&PLATFORMPATH);
@@ -99,24 +130,30 @@ static bool folder_object_to_path(PA_ObjectRef f, std::string& path) {
 static PA_ObjectRef path_to_folder_object(std::string& m) {
     
     PA_Variable    cbparams[2];
-    cbparams[0] = PA_CreateVariable(eVK_Unistring);
+    cbparams[0] = PA_CreateVariable(eVK_Undefined);
     cbparams[1] = PA_CreateVariable(eVK_Longint);
     
     C_TEXT t;
     t.setUTF8String((const uint8_t *)m.c_str(), (uint32_t)m.length());
     PA_Unistring path = PA_CreateUnistring((PA_Unichar *)t.getUTF16StringPtr());
+    if(PA_GetLastError() != eER_NoErr) {
+        return NULL;
+    }
     
     PA_SetStringVariable(&cbparams[0], &path);
     PA_SetLongintVariable(&cbparams[1], 1/*fk platform path*/);
     PA_Variable folder = PA_ExecuteCommandByID(1567 /*4D.Folder*/, cbparams, 2);
+    bool valid = folder.fType != 0 && PA_GetLastError() == eER_NoErr
+        && PA_GetVariableKind(folder) == eVK_Object;
     PA_ClearVariable(&cbparams[0]);
     PA_ClearVariable(&cbparams[1]);
-    PA_DisposeUnistring(&path);
-
-    // NOTE: `folder` is intentionally NOT cleared here (unlike in _object_to_path)
-    // because the PA_ObjectRef this function returns is owned by it; clearing
-    // the variable before returning could invalidate the returned reference.
-    // This function is currently unused (dead code) — remove it if it stays that way.
+    if(!valid) {
+        if(folder.fType != 0) {
+            PA_ClearVariable(&folder);
+        }
+        return NULL;
+    }
+    // Transfer the returned variable's owning reference to the caller.
     return PA_GetObjectVariable(folder);
 }
 
@@ -219,6 +256,9 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
             NSMutableArray *attachments = [[NSMutableArray alloc]init];
             for (PA_long32 i = 0; i < PA_GetCollectionLength(_attachments); ++i) {
                 PA_Variable v = PA_GetCollectionElement(_attachments, i);
+                if(PA_GetLastError() != eER_NoErr) {
+                    continue;
+                }
                 if(PA_GetVariableKind(v) == eVK_Object) {
                     PA_ObjectRef o = PA_GetObjectVariable(v);
                     std::string path;
@@ -234,9 +274,11 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
                         [a release];
                     }
                 }
+                PA_ClearVariable(&v);
             }
             [dict setObject:attachments forKey:@"attachments"];
             [attachments release];
+            PA_DisposeCollection(_attachments);
         }
         
         PA_CollectionRef _recipients = ob_get_c(options, L"recipients");
@@ -244,6 +286,9 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
             NSMutableArray *recipients = [[NSMutableArray alloc]init];
             for (PA_long32 i = 0; i < PA_GetCollectionLength(_recipients); ++i) {
                 PA_Variable v = PA_GetCollectionElement(_recipients, i);
+                if(PA_GetLastError() != eER_NoErr) {
+                    continue;
+                }
                 if(PA_GetVariableKind(v) == eVK_Unistring) {
                     PA_Unistring s = PA_GetStringVariable(v);
                     C_TEXT t;
@@ -254,6 +299,7 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
                     }
                     [r release];
                 }
+                PA_ClearVariable(&v);
             }
             // setObject:/release moved OUTSIDE the for-loop (previously nested one
             // brace too shallow, which released `recipients` after the 1st element
@@ -261,6 +307,7 @@ static void CREATE_EMAIL_DRAFT(PA_PluginParameters params) {
             // and leaked it entirely with 0 recipients).
             [dict setObject:recipients forKey:@"recipients"];
             [recipients release];
+            PA_DisposeCollection(_recipients);
         }
 
         PA_RunInMainProcess(
